@@ -1,1 +1,6 @@
 /target
+/.env
+/dev
+.cargo/
+mempalace.yaml
+entities.json

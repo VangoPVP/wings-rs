@@ -1,0 +1,38 @@
+# Development config. `remote` should point at your Panel; `token_id`/`token`
+# must match the node registered there. Swagger UI: http://127.0.0.1:8080/docs
+debug: true
+uuid: dev-node
+token_id: dev-token-id
+token: dev-node-token
+remote: http://127.0.0.1:3001
+allowed_origins: ["*"]
+api:
+  host: 127.0.0.1
+  port: 8080
+  upload_limit: 100
+  docs: true
+system:
+  root_directory: dev/data
+  data: dev/data/volumes
+  archive_directory: dev/data/archives
+  backup_directory: dev/data/backups
+  tmp_directory: dev/data/tmp
+  # Containers run as this user; match your own uid so you can read the files.
+  user: { uid: 1000, gid: 1000 }
+  state_report_interval: 15
+  crash_detection:
+    enabled: true
+    detect_clean_exit_as_crash: false
+    timeout: 60
+  sftp:
+    enabled: true
+    bind_address: 127.0.0.1
+    bind_port: 2022
+docker:
+  # The dev image (wings-test-yolk) only exists locally, so don't try to pull it.
+  image_pull_policy: if_not_present
+  network:
+    name: wings_dev
+    interface: 172.31.250.1
+    subnet: 172.31.250.0/24
+    gateway: 172.31.250.1
