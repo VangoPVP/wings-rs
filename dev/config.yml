@@ -7,7 +7,7 @@ token: dev-node-token
 remote: http://127.0.0.1:3001
 allowed_origins: ["*"]
 api:
-  host: 127.0.0.1
+  host: 0.0.0.0
   port: 8080
   upload_limit: 100
   docs: true
@@ -18,7 +18,7 @@ system:
   backup_directory: dev/data/backups
   tmp_directory: dev/data/tmp
   # Containers run as this user; match your own uid so you can read the files.
-  user: { uid: 1000, gid: 1000 }
+  user: {uid: 1000, gid: 1000}
   state_report_interval: 15
   crash_detection:
     enabled: true
