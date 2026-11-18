@@ -20,6 +20,7 @@ use bollard::{
 use futures_util::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 pub const LABEL_SERVICE: &str = "Service";
 pub const LABEL_SERVICE_VALUE: &str = "Pterodactyl";
@@ -356,6 +357,17 @@ impl DockerEnvironment {
         match self.docker.remove_container(&self.name, Some(opts)).await {
             Ok(()) => Ok(()),
             Err(e) if is_not_found(&e) => Ok(()),
+            // A concurrent kill (or a start's recreate) is already removing it. Wait for
+            // that removal to land instead of reporting a bogus failure.
+            Err(e @ DockerError::DockerResponseServerError { status_code: 409, .. }) => {
+                for _ in 0..50 {
+                    if !self.exists().await.unwrap_or(true) {
+                        return Ok(());
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e).context("removing container")
+            }
             Err(e) => Err(e).context("removing container"),
         }
     }

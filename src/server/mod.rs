@@ -12,7 +12,7 @@ use configuration::ServerConfigurationResponse;
 use events::{PowerState, ResourceUsage, ServerEvent};
 use std::collections::VecDeque;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWrite;
@@ -37,6 +37,8 @@ pub enum ServerError {
     NotRunning,
     #[error("another power action is currently being processed for this server, please try again later")]
     PowerLocked,
+    #[error("power action was cancelled by a kill")]
+    Killed,
     #[error("not enough disk space available to start the server")]
     DiskSpace,
     #[error("{0:#}")]
@@ -61,6 +63,9 @@ pub struct Server {
     restoring: AtomicBool,
     last_crash: Mutex<Option<Instant>>,
     run_tasks: Mutex<Vec<JoinHandle<()>>>,
+    /// Bumped whenever a run is superseded (kill, new start). In-flight start/install
+    /// operations compare against it and abort instead of resurrecting a killed server.
+    run_generation: AtomicU64,
 }
 
 impl Server {
@@ -96,6 +101,7 @@ impl Server {
             restoring: AtomicBool::new(false),
             last_crash: Mutex::new(None),
             run_tasks: Mutex::new(Vec::new()),
+            run_generation: AtomicU64::new(0),
         })
     }
 
@@ -154,6 +160,20 @@ impl Server {
 
     pub fn is_running(&self) -> bool {
         matches!(self.state(), PowerState::Running | PowerState::Starting)
+    }
+
+    /// Token identifying the current run. Power actions capture it at entry so a kill
+    /// (or a newer start) can cancel work that is still in flight.
+    pub fn generation(&self) -> u64 {
+        self.run_generation.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn bump_generation(&self) -> u64 {
+        self.run_generation.fetch_add(1, Ordering::SeqCst).wrapping_add(1)
+    }
+
+    pub(crate) fn superseded(&self, generation: u64) -> bool {
+        self.run_generation.load(Ordering::SeqCst) != generation
     }
 
     pub fn is_installing(&self) -> bool {
@@ -269,10 +289,10 @@ impl Server {
     }
 
     pub async fn destroy(&self) -> anyhow::Result<()> {
+        self.bump_generation();
         self.expect_exit.store(true, Ordering::SeqCst);
         self.abort_run_tasks();
-        let _ = self.env.kill("SIGKILL").await;
-        self.env.remove().await?;
+        let _ = self.env.remove().await;
         self.fs.delete_root().await?;
         self.set_state(PowerState::Offline);
         self.publish(ServerEvent::Deleted);

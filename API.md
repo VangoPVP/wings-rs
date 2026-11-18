@@ -52,7 +52,7 @@ Websocket permissions: `websocket.connect` (required), `control.console`,
 | `GET /api/servers/{uuid}` | | `ServerDetails` |
 | `DELETE /api/servers/{uuid}` | | 202. Kills, removes container and files |
 | `GET /api/servers/{uuid}/logs?size=100` | | `{"data": ["line", ...]}` |
-| `POST /api/servers/{uuid}/power` | `{action: start\|stop\|restart\|kill, wait_seconds?}` | 202 `{status, server_id, action}` |
+| `POST /api/servers/{uuid}/power` | `{action: start\|stop\|restart\|kill, wait_seconds?}` | 202 `{status, server_id, action}` (200 for `kill`) |
 | `POST /api/servers/{uuid}/commands` | `{commands: ["say hi"]}` | `{status, sent}` (409/400 if not running) |
 | `POST /api/servers/{uuid}/install` | | 202 |
 | `POST /api/servers/{uuid}/reinstall` | | 202 |
@@ -72,7 +72,10 @@ Websocket permissions: `websocket.connect` (required), `control.console`,
 Power semantics: `start` always re-syncs config from the Panel, rewrites egg
 config files and **recreates the container** (so limit changes apply).
 `stop` sends the egg stop (command/signal/docker stop) and waits up to 10 min
-before killing. `restart` = stop + start. `kill` = SIGKILL, bypasses the power lock.
+before killing. `restart` = stop + start. `kill` force-removes the server
+container (and any leftover `<uuid>_installer` / `<uuid>_chown` container),
+cancels any in-flight start/restart/install, and returns once it is gone — it
+works whether the process is running, starting, installing or already exited.
 `wait_seconds` = how long to wait for another in-flight power action (default: fail immediately with 409).
 
 ### Files (`/api/servers/{uuid}/files/...`)

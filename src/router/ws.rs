@@ -279,6 +279,7 @@ impl Connection {
             return Some(WsMessage::new("daemon error", vec![format!("missing permission {perm}")]));
         }
         let server = self.server.clone();
+        let generation = server.generation();
         let out = self.out_tx.clone();
         let detailed = self.can("admin.websocket.errors");
         let user = self.claims.as_ref().map(|c| c.user_uuid.clone());
@@ -290,7 +291,11 @@ impl Connection {
             None,
         );
         tokio::spawn(async move {
-            if let Err(e) = server.handle_power(action, None).await {
+            if let Err(e) = server.handle_power_from(action, None, generation).await {
+                if matches!(e, crate::server::ServerError::Killed) {
+                    tracing::debug!(server = %server.uuid(), ?action, "power action cancelled by kill");
+                    return;
+                }
                 let text = match &e {
                     crate::server::ServerError::Other(_) if !detailed => {
                         "an unexpected error occurred while processing the power action".to_string()

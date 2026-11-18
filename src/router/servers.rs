@@ -1,8 +1,8 @@
 use super::ServerRef;
 use crate::context::AppRef;
 use crate::error::{ApiError, ApiJson, ApiQuery, ApiResult};
-use crate::server::Server;
 use crate::server::events::PowerAction;
+use crate::server::{Server, ServerError};
 use axum::{
     Json, Router,
     extract::State,
@@ -126,10 +126,45 @@ async fn power(
     let wait = req.wait_seconds.map(|w| Duration::from_secs(w.min(300)));
     let server = s.clone();
     let action = req.action;
+    // Capture before spawning: if a kill is handled before this task is polled, the
+    // start/stop/restart must see itself as superseded instead of running anyway.
+    let generation = s.generation();
+
+    if action == PowerAction::Kill {
+        // Run the teardown in its own task (it keeps going even if the panel disconnects)
+        // and wait for it so genuine Docker failures reach the caller instead of a blind 202.
+        let task = tokio::spawn(async move { server.handle_power(action, wait).await });
+        tokio::time::timeout(Duration::from_secs(30), task)
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    StatusCode::GATEWAY_TIMEOUT,
+                    "timed out removing the server container",
+                )
+            })?
+            .map_err(|e| ApiError::internal(format!("kill task failed: {e}")))?
+            .map_err(|e| ApiError::internal(format!("kill failed: {e}")))?;
+        return Ok((
+            StatusCode::OK,
+            Json(PowerResponse {
+                status: "killed",
+                server_id: s.uuid().to_string(),
+                action,
+            }),
+        ));
+    }
+
     tokio::spawn(async move {
-        if let Err(e) = server.handle_power(action, wait).await {
-            tracing::warn!(server = %server.uuid(), ?action, error = %e, "power action failed");
-            server.daemon_message(format!("Power action failed: {e}"));
+        if let Err(e) = server.handle_power_from(action, wait, generation).await {
+            match e {
+                ServerError::Killed => {
+                    tracing::debug!(server = %server.uuid(), ?action, "power action cancelled by kill");
+                }
+                e => {
+                    tracing::warn!(server = %server.uuid(), ?action, error = %e, "power action failed");
+                    server.daemon_message(format!("Power action failed: {e}"));
+                }
+            }
         }
     });
     Ok((
@@ -169,9 +204,10 @@ async fn reinstall(ServerRef(s): ServerRef) -> ApiResult<(StatusCode, Json<Value
 
 fn start_install(s: Arc<Server>, reinstall: bool) -> ApiResult<(StatusCode, Json<Value>)> {
     s.ensure_idle()?;
+    let generation = s.generation();
     let server = s.clone();
     tokio::spawn(async move {
-        let _ = server.install(reinstall).await;
+        let _ = server.install_from(reinstall, generation).await;
     });
     Ok((
         StatusCode::ACCEPTED,

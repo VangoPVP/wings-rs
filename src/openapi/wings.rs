@@ -163,10 +163,13 @@ fn server_logs() {}
     params(("server" = String, Path, description = "Server UUID")),
     request_body = PowerRequest,
     responses(
-        (status = 202, description = "Action queued", body = PowerResponse),
+        (status = 200, description = "Container killed and removed (kill)", body = PowerResponse),
+        (status = 202, description = "Action queued (start/stop/restart)", body = PowerResponse),
         (status = 403, description = "Server is suspended", body = ErrorResponse),
         (status = 404, description = "Server not found", body = ErrorResponse),
         (status = 409, description = "Server is installing, transferring, restoring or another power action is running", body = ErrorResponse),
+        (status = 500, description = "Docker failed to remove the container during a kill", body = ErrorResponse),
+        (status = 504, description = "Kill timed out", body = ErrorResponse),
     ),
 )]
 fn server_power() {}

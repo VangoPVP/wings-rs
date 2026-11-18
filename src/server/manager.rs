@@ -107,12 +107,28 @@ impl Manager {
         server.fs.ensure_root().await?;
         self.add(server.clone());
         let s = server.clone();
+        // Capture the generation so a kill during/after the install still prevents
+        // the start-on-completion from resurrecting the server.
+        let generation = s.generation();
         tokio::spawn(async move {
             let ok = s.install(false).await.is_ok();
             if ok && start_on_completion
-                && let Err(e) = s.handle_power(PowerAction::Start, Some(Duration::from_secs(30))).await
+                && let Err(e) = s
+                    .handle_power_from(
+                        PowerAction::Start,
+                        Some(Duration::from_secs(30)),
+                        generation,
+                    )
+                    .await
             {
-                tracing::warn!(server = %s.uuid(), error = %e, "failed to start after install");
+                match e {
+                    super::ServerError::Killed => {
+                        tracing::debug!(server = %s.uuid(), "start after install cancelled by kill")
+                    }
+                    e => {
+                        tracing::warn!(server = %s.uuid(), error = %e, "failed to start after install")
+                    }
+                }
             }
         });
         Ok(server)

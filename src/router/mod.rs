@@ -128,6 +128,7 @@ impl From<crate::server::ServerError> for ApiError {
             E::Installing | E::Transferring | E::Restoring | E::PowerLocked | E::AlreadyRunning => {
                 ApiError::conflict(e.to_string())
             }
+            E::Killed => ApiError::conflict(e.to_string()),
             E::NotRunning => ApiError::bad_request(e.to_string()),
             E::Suspended => ApiError::forbidden(e.to_string()),
             E::DiskSpace => ApiError::new(axum::http::StatusCode::INSUFFICIENT_STORAGE, e.to_string()),

@@ -82,11 +82,11 @@ impl Server {
         Ok(())
     }
 
-    pub(crate) fn watch_process(self: &Arc<Self>) {
+    pub(crate) fn watch_process(self: &Arc<Self>, run: u64) {
         let server = self.clone();
         tokio::spawn(async move {
             let exit = server.env.wait_for_exit().await;
-            server.on_process_exit(exit).await;
+            server.on_process_exit(run, exit).await;
         });
         let server = self.clone();
         self.add_run_task(tokio::spawn(async move { server.poll_stats().await }));
@@ -145,7 +145,17 @@ impl Server {
         }
     }
 
-    pub(crate) async fn on_process_exit(self: &Arc<Self>, exit: crate::environment::ExitInfo) {
+    pub(crate) async fn on_process_exit(
+        self: &Arc<Self>,
+        run: u64,
+        exit: crate::environment::ExitInfo,
+    ) {
+        // A kill or a newer start already took over: ignore this run's exit so it cannot
+        // flip the current run's state to offline or trigger a crash restart.
+        if self.superseded(run) {
+            tracing::debug!(server = %self.uuid(), "ignoring exit from superseded run");
+            return;
+        }
         self.abort_run_tasks();
         *self.stdin.lock().await = None;
         self.update_resources(|r| {
@@ -164,7 +174,7 @@ impl Server {
             "server process exited"
         );
         if !expected && was != PowerState::Offline {
-            self.handle_crash(exit).await;
+            self.handle_crash(run, exit).await;
         }
     }
 }
